@@ -6,11 +6,9 @@ library(nflreadr)
 
 # schedules
 
-### load schedules data
-schedules <- load_schedules(seasons = 2010:2022)
-
-### clean it
-schedules_clean <- clean_homeaway(schedules, invert = c("result","spread_line"))
+### load and clean schedules data from 2010
+schedules_clean <- clean_homeaway(load_schedules(seasons = 2010:2022), 
+                                  invert = c("result","spread_line"))
 
 ### build ats data
 ats_df <- schedules_clean |> 
