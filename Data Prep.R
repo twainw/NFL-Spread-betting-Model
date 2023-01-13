@@ -59,6 +59,12 @@ epa_df <- off_epa |>
   rename(team = posteam) |> 
   mutate(team = clean_team_abbrs(team))
 
+# Join Data ---------------------------------------------------------------
+
+# Calculate Rolling Means -------------------------------------------------
+
+
+
 
 
 
