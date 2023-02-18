@@ -67,9 +67,10 @@ epa_df <- off_epa |>
 ## we don't want to include week 6 epa cause that will be unknown going into week 6.
 ## thus, n=4. Thus, week 5 roll avg will include week 5 + epa in the previous 4 (n) games.
 ## than we lag this result to get the first 5 games avg epa for week 6
-
 n=4 
 
+## should use the across function to apply this to all other columns
+## avoid manually typing them out
 epa_df |> 
   select(game_id:total_rush_plays) |>
   group_by(season, team) |> 
