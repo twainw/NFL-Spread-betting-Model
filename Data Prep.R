@@ -122,7 +122,7 @@ sapply(roll_epa_df, function(x) sum(is.na(x))) # <- actual missing
 ((32*16*(length(seasons)-2))+(32*17*2)-2) - 32*(n+1)*length(seasons) # <- expected number of rows after removing NAs
 
 ## calculate ranks
-final_df <- roll_epa_df |> 
+df_final <- roll_epa_df |> 
   filter(!is.na(rolling_rush_epa_avg)) |> 
   group_by(season, week) |> 
   mutate(rolling_rush_epa_avg_rank = rank(desc(rolling_rush_epa_avg), ties.method = 'average'),
@@ -133,12 +133,13 @@ final_df <- roll_epa_df |>
   ungroup() |>
   left_join(schedules_long, by = c("game_id", "team")) |> 
   relocate(type, .after = team) |>
-  select(game_id, type, total_rush_epa:last_col()) |>
+  select(season,game_id, type, total_rush_epa:last_col()) |>
   pivot_wider(names_from = type, 
               values_from = c(total_rush_epa:last_col())) |> 
   left_join(schedules |> select(game_id, weekday, away_team, home_team, spread_line, 
                                 div_game, roof, surface, away_coach, home_coach, stadium), 
-            by = "game_id")
+            by = "game_id") |> 
+  filter(!is.na(total_rush_epa_home_team), !is.na(total_rush_epa_away_team))
 
-
+sapply(df_final, function(x) sum(is.na(x)))
 
