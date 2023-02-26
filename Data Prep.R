@@ -81,6 +81,31 @@ epa_df <- off_epa |>
   rename(team = posteam) |> 
   mutate(team = clean_team_abbrs(team))
 
+### figure out which teams covered the spread
+team_cover_df <- schedules |> 
+  clean_homeaway(invert = c("spread_line", "result")) |> 
+  select(game_id, team, team_score, opponent, opponent_score, result, spread_line) |> 
+  mutate(team_cover = case_when(
+    result > spread_line ~ 1, 
+    TRUE ~ 0
+  )) |> 
+  rename(actual_cover_team = team)
+
+### qc team_cover_df
+team_cover_df |> distinct(game_id) |> count() # total number of games
+team_cover_df |> summarize(sum(team_cover)) # total number of games where a team covered the spread
+
+team_cover_df |> group_by(game_id) |> 
+  summarize(count = sum(team_cover)) |> 
+  ungroup() |> 
+  filter(count == 0) |> 
+  View() # number of games where the spread bet was pushed
+
+## final changes to team_cover_df
+team_cover_final <- team_cover_df |> 
+  filter(team_cover == 1) |> 
+  select(game_id, actual_cover_team)
+
 # Calculate Rolling Means -------------------------------------------------
 
 ## let's try calculating 5-game rolling rush epa/play

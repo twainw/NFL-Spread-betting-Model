@@ -53,16 +53,19 @@ lm_fit <- lm_spec |> fit(formula = fmla, data = df_train)
 lm_fit |> pluck("fit") |> summary()
 
 ## make predictions on df_train
-augment(lm_fit, new_data = df_train) |> 
+lm_predictions <- augment(lm_fit, new_data = df_train) |> 
   select(game_id, spread_line, .pred, .resid) |> 
   left_join(schedules |> select(result, game_id:home_score), by = "game_id") |> 
   mutate(pred_cover_team = case_when(
     .pred < spread_line ~ home_team, 
     .pred > spread_line ~ away_team
   )) |> 
-  relocate(pred_cover_team, .after = .resid) |> 
-  View()
+  relocate(pred_cover_team, .after = .resid) |>
+  left_join(team_cover_final, by = "game_id") |> 
+  relocate(actual_cover_team, .after = pred_cover_team) |> 
+  mutate(actual_cover_team = replace_na(actual_cover_team, "PUSH"))
 
+table(lm_predictions$actual_cover_team)
 
 
 
