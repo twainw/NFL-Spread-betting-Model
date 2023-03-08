@@ -44,36 +44,27 @@ predict_cover_team <- function(model_obj, df){
     mutate(pred_away = ifelse(pred_cover_team == away_team, 1, 0),
            actual_away = ifelse(actual_cover_team == away_team, 1, 0)) |> 
     mutate(pred_away_true = ifelse(pred_away == actual_away, 1, 0),
-           pred_straight = ifelse(pred_cover_team == actual_cover_team, 1, 0)) |> 
-    mutate(resid_category = case_when(
-      .resid <= -15 ~ "-15 or less",
-      .resid <= -10 ~ "-15 to -10",
-      .resid <= 0 ~ "-10 to 0", 
-      .resid <= 10 ~ "0 to 10",
-      .resid <= 15 ~ "10 to 15", 
-      TRUE ~ "15 or More"
-    ))
+           pred_straight = ifelse(pred_cover_team == actual_cover_team, 1, 0))
   
   return(predictions)
 }
 
 ## evaluate the binary predictor variable
-evaluate_predictions <- function(df_w_predictions) {
+evaluate_predictions <- function(df_w_predictions, title) {
   
   ### confusion matrix
-  confusion <- summary(conf_mat(table(df_w_predictions$pred_away_true, df_w_predictions$actual_away)), 
-          event_level = 'second')
+  conf_table <- conf_mat(table(df_w_predictions$pred_away_true, df_w_predictions$actual_away))
+  conf_summary <- summary(conf_table, event_level = 'second')
   
-  ### % correct by Spread - xSpread
-  col_chart <- df_w_predictions |> 
-    group_by(resid_category) |> 
-    summarize(total_correct = sum(pred_straight),
-              n = n(),
-              perc_correct = total_correct / n) |> 
-    ggplot(aes(x = resid_category, y = perc_correct)) +
-    geom_col()
+  density_chart <- lm_predictions |> 
+    select(game_id, spread_line, .pred, result) |> 
+    pivot_longer(!game_id, names_to = "type", values_to = "value") |> 
+    ggplot(aes(value, fill = type, color = type)) +
+    geom_density(alpha = 0.1) +
+    theme_minimal() +
+    labs(title = title)
   
-  return(list(confusion, col_chart))
+  return(list(conf_table, conf_summary, density_chart))
 }
 
 ## model formula
@@ -108,7 +99,8 @@ lm_fit |> pluck("fit") |> summary()
 
 ## make predictions on df_train
 lm_predictions <- predict_cover_team(lm_fit, df_train)
-evaluate_predictions(lm_predictions)
+evaluate_predictions(lm_predictions, title = "Linear Regression Density Chart")
+
 
 
 
