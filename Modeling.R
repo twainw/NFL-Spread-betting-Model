@@ -79,11 +79,7 @@ fmla <- formula("spread_line ~
                    rolling_rush_def_epa_avg_rank_home_team +
                    
                    rolling_pass_def_epa_avg_rank_away_team +
-                   rolling_pass_def_epa_avg_rank_home_team +
-                   
-                   roof +
-                   surface + 
-                   div_game
+                   rolling_pass_def_epa_avg_rank_home_team
                    ")
 
 # Linear Regression -------------------------------------------------------
@@ -99,8 +95,106 @@ lm_fit |> pluck("fit") |> summary()
 
 ## make predictions on df_train
 lm_predictions <- predict_cover_team(lm_fit, df_train)
+lm_predictions|> summarize(accuracy = mean(pred_straight))
 evaluate_predictions(lm_predictions, title = "Linear Regression Density Chart")
 
+# Random Forest -----------------------------------------------------------
 
+## specify the random forest object
+rf_spec <- rand_forest(
+  mtry = tune(), 
+  trees = 1000,
+  min_n = tune()
+) |> 
+  set_mode('regression') |> 
+  set_engine('ranger')
+
+## create a workflow
+rf_tune_wf <- workflow() |> 
+  add_formula(fmla) |> 
+  add_model(rf_spec)
+
+## train hyperparameters
+set.seed(234)
+trees_folds <- vfold_cv(df_train)
+
+### choose grid = 20 to choose 20 grid points automatically
+doParallel::registerDoParallel()
+
+set.seed(345)
+tune_res <- tune_grid(
+  rf_tune_wf,
+  resamples = trees_folds,
+  grid = 20
+)
+
+## collect metrics
+tune_res |> 
+  collect_metrics() |> 
+  filter(.metric == 'rmse') |> 
+  select(mean, min_n, mtry) |> 
+  pivot_longer(min_n:mtry,
+               values_to = "value",
+               names_to = "parameter"
+  ) |> 
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "RMSE") # lower values of mtry and 10-20 range for min_n is better
+
+## set a range of hyperparameters to try based on the initial result
+rf_grid <- grid_regular(
+  mtry(range = c(10, 30)),
+  min_n(range = c(2, 8)),
+  levels = 5
+)
+
+rf_grid
+
+## tune one more time
+set.seed(456)
+regular_res <- tune_grid(
+  rf_tune_wf,
+  resamples = trees_folds,
+  grid = rf_grid
+)
+
+## collect metrics
+regular_res |> 
+  collect_metrics() |> 
+  filter(.metric == 'rmse') |> 
+  mutate(min_n = factor(min_n)) %>%
+  ggplot(aes(mtry, mean, color = min_n)) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(x = NULL, y = "RMSE")
+
+## choose the best model and finalize
+final_rf <- finalize_model(
+  rf_spec,
+  select_best(regular_res, "rmse")
+)
+
+final_rf
+
+## explore the model a little bit
+
+### variable importance plot
+library(vip)
+
+final_rf |> 
+  set_engine("ranger", importance = "permutation") |> 
+  fit(fmla, 
+      data = df_train) |> 
+  vip(geom = "point")
+
+## fit the model 
+rf_fit <- final_rf |> fit(formula = fmla, data = df_train)
+rf_fit
+
+## make predictions on df_train
+rf_predictions <- predict_cover_team(rf_fit, df_train)
+rf_predictions |> summarize(accuracy = mean(pred_straight))
+evaluate_predictions(rf_predictions, title = "Random Forest Density Chart")
 
 
