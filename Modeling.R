@@ -49,14 +49,22 @@ predict_cover_team <- function(model_obj, df){
   return(predictions)
 }
 
+all_models_test_results |> 
+  filter(pred_away == 1) |> 
+  group_by(model) |> 
+  summarize(total_away_predictions = sum(pred_away),
+            total_away_correct_predicitions = sum(actual_away)) |> 
+  ungroup() |> 
+  mutate(total_away_correct_predicitions / total_away_predictions)
+
 ## evaluate the binary predictor variable
 evaluate_predictions <- function(df_w_predictions, title) {
   
   ### confusion matrix
-  conf_table <- conf_mat(table(df_w_predictions$pred_away_true, df_w_predictions$actual_away))
+  conf_table <- conf_mat(table(df_w_predictions$actual_away, df_w_predictions$pred_away))
   conf_summary <- summary(conf_table, event_level = 'second')
   
-  density_chart <- lm_predictions |> 
+  density_chart <- df_w_predictions |> 
     select(game_id, spread_line, .pred, result) |> 
     pivot_longer(!game_id, names_to = "type", values_to = "value") |> 
     ggplot(aes(value, fill = type, color = type)) +
@@ -65,6 +73,14 @@ evaluate_predictions <- function(df_w_predictions, title) {
     labs(title = title)
   
   return(list(conf_table, conf_summary, density_chart))
+}
+
+## get the away team's accuracy
+get_away_team_accuracy <- function(df_w_predictions, model){
+  
+  conf_table <- conf_mat(table(df_w_predictions$pred_away_true, df_w_predictions$actual_away))
+  conf_summary <- summary(conf_table, event_level = 'second')
+  conf_summary |> filter(.metric == 'accuracy') |> mutate(model = model)
 }
 
 ## model formula
@@ -196,5 +212,112 @@ rf_fit
 rf_predictions <- predict_cover_team(rf_fit, df_train)
 rf_predictions |> summarize(accuracy = mean(pred_straight))
 evaluate_predictions(rf_predictions, title = "Random Forest Density Chart")
+
+# Gradient Boosting -------------------------------------------------------
+
+## model specification
+xgboost_model <- boost_tree(
+  mode       = "regression", 
+  trees      = 1000, 
+  min_n      = tune(), 
+  tree_depth = tune(), 
+  learn_rate = tune()
+) |> 
+  set_engine("xgboost", objective = "reg:squarederror")
+
+xgboost_model
+
+## create a workflow
+xgf_tune_wf <- workflow() |> 
+  add_formula(fmla) |> 
+  add_model(xgboost_model)
+
+## grid spec
+xgboost_params <- parameters(min_n(range = c(2, 8)), tree_depth(), learn_rate())
+xgboost_params
+
+set.seed(123)
+xgboost_grid <- grid_max_entropy(xgboost_params, size = 30)
+xgboost_grid
+
+## tune model
+doParallel::registerDoParallel()
+xgboost_stage_1_cv_results_tbl <- tune_grid(
+  xgf_tune_wf,
+  resamples = trees_folds,
+  grid      = xgboost_grid,
+  metrics   = metric_set(mae, mape, rmse, rsq),
+  control   = control_grid(verbose = TRUE)
+)
+
+xgboost_stage_1_cv_results_tbl %>% show_best("rmse", n = 10, maximize = FALSE)
+
+## select the best xgboost model
+params_xgboost_best <- xgboost_stage_1_cv_results_tbl %>% 
+  select_best("rmse", maximize = FALSE)
+
+params_xgboost_best
+
+## finalize the model
+xgboost_stage_2_model <- xgboost_model %>% 
+  finalize_model(params_xgboost_best)
+
+xgboost_stage_2_model
+
+## fit the model 
+xgb_fit <- xgboost_stage_2_model |> fit(formula = fmla, data = df_train)
+xgb_fit
+
+## make predictions on df_train
+xgb_predictions <- predict_cover_team(xgb_fit, df_train)
+xgb_predictions |> summarize(accuracy = mean(pred_straight))
+evaluate_predictions(xgb_predictions, title = "XGBoost Density Chart")
+
+# Compare all three models ------------------------------------------------
+
+all_models <- bind_rows(
+  lm_predictions |> mutate(model = "lm"),
+  rf_predictions |> mutate(model = "rf"),
+  xgb_predictions |> mutate(model = "xgb")
+)
+
+all_models |> 
+  group_by(season, model) |> 
+  summarize(accuracy = mean(pred_straight)) |> 
+  pivot_wider(names_from = model, values_from = accuracy)
+
+# make predictions on the test data ---------------------------------------
+
+## linear model
+lm_test_preds <- predict_cover_team(lm_fit, df_test)
+lm_test_preds |> summarize(accuracy = mean(pred_straight))
+
+## random forest model
+rf_test_preds <- predict_cover_team(rf_fit, df_test)
+rf_test_preds |> summarize(accuracy = mean(pred_straight))
+
+## gradient boosting model
+xgb_test_preds <- predict_cover_team(xgb_fit, df_test)
+xgb_test_preds |> summarize(accuracy = mean(pred_straight))
+
+## compare all three models
+all_models_test_results <- bind_rows(
+  lm_test_preds |> mutate(model = "lm"),
+  rf_test_preds |> mutate(model = "rf"),
+  xgb_test_preds |> mutate(model = "xgb")
+)
+
+## compare the away team's accuracy
+get_away_team_accuracy(lm_test_preds, "lm")
+get_away_team_accuracy(rf_test_preds, "rf")
+get_away_team_accuracy(xgb_test_preds, "xgb")
+
+## straight up predictions
+all_models_test_results |> 
+  group_by(season, model) |> 
+  summarize(accuracy = mean(pred_straight)) |> 
+  pivot_wider(names_from = model, values_from = accuracy)
+
+
 
 
