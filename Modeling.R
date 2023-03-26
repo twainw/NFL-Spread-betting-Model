@@ -2,6 +2,9 @@ library(tidyverse)
 library(tidymodels)
 library(yardstick)
 
+# Change the spread line
+df_final <- df_final |> mutate(spread_line = -spread_line)
+
 # EDA ---------------------------------------------------------------------
 
 df_final |> 
@@ -17,12 +20,11 @@ min(df_final$spread_line)
 
 ## create a training set
 df_train <- df_final |> 
-  filter(season <= 2018)
+  filter(season %in% c(2017, 2018, 2019, 2020))
 
 ## create a testing set
 df_test <- df_final |> 
-  filter(season > 2018)
-
+  filter(season > 2020)
 
 # Model Setup --------------------------------------------------------
 
@@ -41,46 +43,9 @@ predict_cover_team <- function(model_obj, df){
     relocate(actual_cover_team, .after = pred_cover_team) |> 
     mutate(actual_cover_team = replace_na(actual_cover_team, "PUSH")) |> 
     filter(actual_cover_team != "PUSH") |> 
-    mutate(pred_away = ifelse(pred_cover_team == away_team, 1, 0),
-           actual_away = ifelse(actual_cover_team == away_team, 1, 0)) |> 
-    mutate(pred_away_true = ifelse(pred_away == actual_away, 1, 0),
-           pred_straight = ifelse(pred_cover_team == actual_cover_team, 1, 0))
+    mutate(pred_straight = ifelse(pred_cover_team == actual_cover_team, 1, 0))
   
   return(predictions)
-}
-
-all_models_test_results |> 
-  filter(pred_away == 1) |> 
-  group_by(model) |> 
-  summarize(total_away_predictions = sum(pred_away),
-            total_away_correct_predicitions = sum(actual_away)) |> 
-  ungroup() |> 
-  mutate(total_away_correct_predicitions / total_away_predictions)
-
-## evaluate the binary predictor variable
-evaluate_predictions <- function(df_w_predictions, title) {
-  
-  ### confusion matrix
-  conf_table <- conf_mat(table(df_w_predictions$actual_away, df_w_predictions$pred_away))
-  conf_summary <- summary(conf_table, event_level = 'second')
-  
-  density_chart <- df_w_predictions |> 
-    select(game_id, spread_line, .pred, result) |> 
-    pivot_longer(!game_id, names_to = "type", values_to = "value") |> 
-    ggplot(aes(value, fill = type, color = type)) +
-    geom_density(alpha = 0.1) +
-    theme_minimal() +
-    labs(title = title)
-  
-  return(list(conf_table, conf_summary, density_chart))
-}
-
-## get the away team's accuracy
-get_away_team_accuracy <- function(df_w_predictions, model){
-  
-  conf_table <- conf_mat(table(df_w_predictions$pred_away_true, df_w_predictions$actual_away))
-  conf_summary <- summary(conf_table, event_level = 'second')
-  conf_summary |> filter(.metric == 'accuracy') |> mutate(model = model)
 }
 
 ## model formula
@@ -111,8 +76,7 @@ lm_fit |> pluck("fit") |> summary()
 
 ## make predictions on df_train
 lm_predictions <- predict_cover_team(lm_fit, df_train)
-lm_predictions|> summarize(accuracy = mean(pred_straight))
-evaluate_predictions(lm_predictions, title = "Linear Regression Density Chart")
+lm_predictions |> summarize(accuracy = mean(pred_straight))
 
 # Random Forest -----------------------------------------------------------
 
@@ -211,7 +175,6 @@ rf_fit
 ## make predictions on df_train
 rf_predictions <- predict_cover_team(rf_fit, df_train)
 rf_predictions |> summarize(accuracy = mean(pred_straight))
-evaluate_predictions(rf_predictions, title = "Random Forest Density Chart")
 
 # Gradient Boosting -------------------------------------------------------
 
@@ -271,7 +234,6 @@ xgb_fit
 ## make predictions on df_train
 xgb_predictions <- predict_cover_team(xgb_fit, df_train)
 xgb_predictions |> summarize(accuracy = mean(pred_straight))
-evaluate_predictions(xgb_predictions, title = "XGBoost Density Chart")
 
 # Compare all three models ------------------------------------------------
 
@@ -300,6 +262,9 @@ rf_test_preds |> summarize(accuracy = mean(pred_straight))
 xgb_test_preds <- predict_cover_team(xgb_fit, df_test)
 xgb_test_preds |> summarize(accuracy = mean(pred_straight))
 
+
+# Evaluation predictions --------------------------------------------------
+
 ## compare all three models
 all_models_test_results <- bind_rows(
   lm_test_preds |> mutate(model = "lm"),
@@ -307,17 +272,17 @@ all_models_test_results <- bind_rows(
   xgb_test_preds |> mutate(model = "xgb")
 )
 
-## compare the away team's accuracy
-get_away_team_accuracy(lm_test_preds, "lm")
-get_away_team_accuracy(rf_test_preds, "rf")
-get_away_team_accuracy(xgb_test_preds, "xgb")
-
-## straight up predictions
-all_models_test_results |> 
+## straight up predictions - train results
+all_models |> 
   group_by(season, model) |> 
   summarize(accuracy = mean(pred_straight)) |> 
   pivot_wider(names_from = model, values_from = accuracy)
 
 
+## straight up predictions - test results
+all_models_test_results |> 
+  group_by(season, model) |> 
+  summarize(accuracy = mean(pred_straight)) |> 
+  pivot_wider(names_from = model, values_from = accuracy)
 
 
